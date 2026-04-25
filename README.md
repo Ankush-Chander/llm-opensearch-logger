@@ -20,7 +20,7 @@ OpenSearch Dashboards :5601  (browser UI)
 
 ## 1. Reconfigure Ollama to listen on a different port
 
-Edit the Ollama systemd override so it binds to `127.0.0.1:11435`
+Edit the Ollama systemd override so it binds to `0.0.0.0:11435`
 instead of the default `0.0.0.0:11434`:
 
 ```bash
@@ -31,7 +31,7 @@ Add (or merge into the existing override):
 
 ```ini
 [Service]
-Environment="OLLAMA_HOST=127.0.0.1:11435"
+Environment="OLLAMA_HOST=0.0.0.0:11435"
 ```
 
 Reload and restart:
@@ -41,7 +41,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 
 # Verify
-curl http://127.0.0.1:11435/api/tags
+curl http://0.0.0.0:11435/api/tags
 ```
 
 ---
@@ -132,7 +132,7 @@ All settings can be overridden via environment variables in the
 |---|---|---|
 | `PROXY_HOST` | `0.0.0.0` | Address the proxy binds to |
 | `PROXY_PORT` | `11434` | Port the proxy listens on |
-| `OLLAMA_HOST` | `127.0.0.1` | Ollama host after rebind |
+| `OLLAMA_HOST` | `0.0.0.0` | Ollama host after rebind |
 | `OLLAMA_PORT` | `11435` | Ollama port after rebind |
 | `OPENSEARCH_URL` | `http://localhost:9200` | OpenSearch endpoint |
 | `OPENSEARCH_INDEX` | `ollama-traffic` | Index name |
