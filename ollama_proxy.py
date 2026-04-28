@@ -34,14 +34,35 @@ from aiohttp import web
 # ---------------------------------------------------------------------------
 
 PROXY_HOST = os.getenv("PROXY_HOST", "0.0.0.0")
-PROXY_PORT = int(os.getenv("PROXY_PORT", "11434"))
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
-OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11435"))
 OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "http://localhost:9200").rstrip("/")
 OPENSEARCH_INDEX = os.getenv("OPENSEARCH_INDEX", "ollama-traffic")
 LOG_BODY_MAX_BYTES = int(os.getenv("LOG_BODY_MAX_BYTES", str(64 * 1024)))
 
-OLLAMA_BASE = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
+# Parse mappings: "listen_port:upstream_port[:name]" or "listen_port:host:upstream_port[:name]"
+# Example: "11434:11435:ollama,8002:8003:llama-server"
+PROXY_MAPPINGS_RAW = os.getenv("PROXY_MAPPINGS", "")
+MAPPINGS = []
+
+if PROXY_MAPPINGS_RAW:
+    for item in PROXY_MAPPINGS_RAW.split(","):
+        item = item.strip().strip("'\"")
+        parts = item.split(":")
+        if len(parts) == 2:
+            MAPPINGS.append({"port": int(parts[0]), "upstream": f"http://127.0.0.1:{parts[1]}", "name": "default"})
+        elif len(parts) == 3:
+            # Could be listen:host:port OR listen:port:name
+            if parts[1].isdigit():
+                MAPPINGS.append({"port": int(parts[0]), "upstream": f"http://127.0.0.1:{parts[1]}", "name": parts[2]})
+            else:
+                MAPPINGS.append({"port": int(parts[0]), "upstream": f"http://{parts[1]}:{parts[2]}", "name": "default"})
+        elif len(parts) == 4:
+            MAPPINGS.append({"port": int(parts[0]), "upstream": f"http://{parts[1]}:{parts[2]}", "name": parts[3]})
+else:
+    # Fallback to old environment variables
+    OLD_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
+    OLD_OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", "11435"))
+    OLD_PROXY_PORT = int(os.getenv("PROXY_PORT", "11434"))
+    MAPPINGS.append({"port": OLD_PROXY_PORT, "upstream": f"http://{OLD_OLLAMA_HOST}:{OLD_OLLAMA_PORT}", "name": "ollama"})
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +80,7 @@ async def ensure_index(session: aiohttp.ClientSession) -> None:
         "mappings": {
             "properties": {
                 "request_id":      {"type": "keyword"},
+                "service":         {"type": "keyword"},
                 "conversation_id": {"type": "keyword"},
                 "turn_number":     {"type": "integer"},
                 "timestamp":       {"type": "date"},
@@ -210,6 +232,8 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
     app = request.app
     os_session: aiohttp.ClientSession = app["os_session"]
     ol_session: aiohttp.ClientSession = app["ol_session"]
+    upstream_base: str = app["upstream_base"]
+    service_name: str = app["service_name"]
 
     request_id = str(uuid.uuid4())
     ts_start = time.monotonic()
@@ -224,7 +248,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
 
     # --- Build upstream URL ---
     qs = request.query_string
-    target_url = f"{OLLAMA_BASE}{request.path}"
+    target_url = f"{upstream_base}{request.path}"
     if qs:
         target_url += f"?{qs}"
 
@@ -244,6 +268,7 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
 
     doc: dict = {
         "request_id": request_id,
+        "service": service_name,
         "conversation_id": conversation_id,
         "turn_number": turn_number,
         "timestamp": timestamp,
@@ -346,42 +371,56 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
 # App lifecycle
 # ---------------------------------------------------------------------------
 
-async def on_startup(app: web.Application) -> None:
-    # Session for Ollama (no timeout on reads — models can be slow)
-    app["ol_session"] = aiohttp.ClientSession(
+async def run_multi_proxy():
+    # Session for upstreams
+    ol_session = aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=None, connect=10)
     )
     # Session for OpenSearch
-    app["os_session"] = aiohttp.ClientSession(
+    os_session = aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=10)
     )
-    # Wait for OpenSearch and create index
+
+    # Wait for OpenSearch
     for attempt in range(20):
         try:
-            await ensure_index(app["os_session"])
+            await ensure_index(os_session)
             break
         except Exception as exc:
             log.warning("OpenSearch not ready (attempt %d/20): %s", attempt + 1, exc)
             await asyncio.sleep(3)
-    else:
-        log.error("Could not reach OpenSearch — logging will be degraded")
 
+    runners = []
+    for m in MAPPINGS:
+        app = web.Application()
+        app["ol_session"] = ol_session
+        app["os_session"] = os_session
+        app["upstream_base"] = m["upstream"]
+        app["service_name"] = m["name"]
+        app.router.add_route("*", "/{path_info:.*}", proxy_handler)
+        
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        site = web.TCPSite(runner, PROXY_HOST, m["port"])
+        await site.start()
+        runners.append(runner)
+        log.info("Started proxy for '%s' on %s:%d → %s", m["name"], PROXY_HOST, m["port"], m["upstream"])
 
-async def on_cleanup(app: web.Application) -> None:
-    await app["ol_session"].close()
-    await app["os_session"].close()
-
-
-def build_app() -> web.Application:
-    app = web.Application()
-    app.on_startup.append(on_startup)
-    app.on_cleanup.append(on_cleanup)
-    # Match every path and method
-    app.router.add_route("*", "/{path_info:.*}", proxy_handler)
-    return app
+    try:
+        # Keep running forever
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        for r in runners:
+            await r.cleanup()
+        await ol_session.close()
+        await os_session.close()
 
 
 if __name__ == "__main__":
-    log.info("Starting Ollama logging proxy on %s:%d → %s", PROXY_HOST, PROXY_PORT, OLLAMA_BASE)
+    log.info("Starting generalized logging proxy")
     log.info("OpenSearch: %s  index: %s", OPENSEARCH_URL, OPENSEARCH_INDEX)
-    web.run_app(build_app(), host=PROXY_HOST, port=PROXY_PORT, access_log=None)
+    try:
+        asyncio.run(run_multi_proxy())
+    except KeyboardInterrupt:
+        pass

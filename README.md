@@ -131,12 +131,23 @@ All settings can be overridden via environment variables in the
 | Variable | Default | Description |
 |---|---|---|
 | `PROXY_HOST` | `0.0.0.0` | Address the proxy binds to |
-| `PROXY_PORT` | `11434` | Port the proxy listens on |
-| `OLLAMA_HOST` | `0.0.0.0` | Ollama host after rebind |
-| `OLLAMA_PORT` | `11435` | Ollama port after rebind |
+| `PROXY_PORT` | `11434` | Port the proxy listens on (ignored if `PROXY_MAPPINGS` is set) |
+| `OLLAMA_HOST` | `0.0.0.0` | Ollama host (ignored if `PROXY_MAPPINGS` is set) |
+| `OLLAMA_PORT` | `11435` | Ollama port (ignored if `PROXY_MAPPINGS` is set) |
+| `PROXY_MAPPINGS`| `""` | Comma-separated mappings: `listen:upstream[:name]` |
 | `OPENSEARCH_URL` | `http://localhost:9200` | OpenSearch endpoint |
 | `OPENSEARCH_INDEX` | `ollama-traffic` | Index name |
 | `LOG_BODY_MAX_BYTES` | `65536` (64 KB) | Max body bytes kept before truncation |
+
+### Multiple Backends (Generalization)
+
+To proxy and log multiple services (e.g., Ollama and llama-server), use `PROXY_MAPPINGS`:
+
+```ini
+Environment=PROXY_MAPPINGS=11434:11435:ollama,8002:8003:llama-server
+```
+
+Each mapping follows the format `listen_port:upstream_port[:service_name]` or `listen_port:host:upstream_port[:service_name]`. The `service_name` will be stored in the `service` field in OpenSearch.
 
 ---
 
@@ -174,6 +185,7 @@ counts, and the final turn number.
 ```json
 {
   "request_id":         "uuid",
+  "service":            "ollama",
   "conversation_id":    "sha1(system|first_user|model)",
   "turn_number":        3,
   "timestamp":          "2025-04-25T10:00:00Z",
