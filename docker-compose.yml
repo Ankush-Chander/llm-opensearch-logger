@@ -1,18 +1,28 @@
-version: "3.9"
-
 services:
-  opensearch:
-    image: opensearchproject/opensearch:2.13.0
-    container_name: opensearch
+  proxy:
+    build: .
+    ports:
+      - "11434:11434"
+      - "8002:8002"
     environment:
-      - cluster.name=ollama-logs
-      - node.name=opensearch-node1
+      - OPENSEARCH_URL=http://opensearch:9200
+      - PROXY_MAPPINGS=11434:host.docker.internal:11435:ollama,8002:host.docker.internal:8003:llama-server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - opensearch
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: opensearch-logger-db
+    environment:
+      - cluster.name=docker-cluster
+      - node.name=opensearch-node
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
-      # Disable security plugin for local dev — enable in production
-      - plugins.security.disabled=true
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin@1234!
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "DISABLE_INSTALL_DEMO_CONFIG=true"
+      - "DISABLE_SECURITY_PLUGIN=true"
     ulimits:
       memlock:
         soft: -1
@@ -20,37 +30,21 @@ services:
       nofile:
         soft: 65536
         hard: 65536
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
     ports:
       - "9200:9200"
-      - "9600:9600"   # Performance analyzer
-    networks:
-      - ollama-net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
 
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2.13.0
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.0
     container_name: opensearch-dashboards
     ports:
       - "5601:5601"
     environment:
-      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
-      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
-    networks:
-      - ollama-net
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - "DISABLE_SECURITY_PLUGIN=true"
     depends_on:
-      opensearch:
-        condition: service_healthy
+      - opensearch
 
 volumes:
-  opensearch-data:
-    driver: local
-
-networks:
-  ollama-net:
-    driver: bridge
+  opensearch_data:
