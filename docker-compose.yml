@@ -6,9 +6,7 @@ services:
       - "8002:8002"
     environment:
       - OPENSEARCH_URL=http://opensearch:9200
-      - PROXY_MAPPINGS=11434:host.docker.internal:11435:ollama,8002:host.docker.internal:8003:llama-server
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - PROXY_MAPPINGS=11434:10.100.85.52:11435:ollama,8002:10.100.85.52:8003:llama-server #change ip according to your env
     depends_on:
       - opensearch
 
@@ -19,14 +17,11 @@ services:
       - cluster.name=docker-cluster
       - node.name=opensearch-node
       - discovery.type=single-node
-      - bootstrap.memory_lock=true
+      - bootstrap.memory_lock=false
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - "DISABLE_INSTALL_DEMO_CONFIG=true"
       - "DISABLE_SECURITY_PLUGIN=true"
     ulimits:
-      memlock:
-        soft: -1
-        hard: -1
       nofile:
         soft: 65536
         hard: 65536
