@@ -19,12 +19,12 @@ async def ensure_index(session: aiohttp.ClientSession) -> None:
 
 
 async def index_document(session: aiohttp.ClientSession, doc: dict) -> None:
-    doc_id = doc.get("conversation_id") or doc["request_id"]
+    doc_id = doc["request_id"]
     url = f"{OPENSEARCH_URL}/{OPENSEARCH_INDEX}/_doc/{doc_id}"
     try:
         async with session.put(url, json=doc, headers={"Content-Type": "application/json"}) as resp:
             if resp.status not in (200, 201):
                 body = await resp.text()
-                log.warning("OpenSearch indexing failed (%d): %s", resp.status, body[:200])
+                log.warning("OpenSearch indexing failed (%d): %s", resp.status, body)
     except Exception as exc:
         log.warning("Failed to index document: %s", exc)
