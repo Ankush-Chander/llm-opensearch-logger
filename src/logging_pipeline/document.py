@@ -22,14 +22,32 @@ def _try_json(raw: bytes) -> Optional[dict]:
         return None
 
 
+def _extract_user_input(body: Optional[dict]) -> str:
+    """Extract the text of the last user message."""
+    if not body:
+        return ""
+    items = body.get("messages") or body.get("input") or []
+    for msg in reversed(items):
+        if msg.get("role") == "user":
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                return " ".join(
+                    p.get("text") or p.get("input_text") or "" 
+                    for p in content if isinstance(p, dict)
+                )
+            return str(content)
+    return ""
+
+
 def _extract_conversation_id(body: Optional[dict]) -> tuple[str, int]:
     """
     Extract conversation_id and turn_number from the request body.
+    Supports 'messages' and 'input' fields.
     """
     if not body:
         return str(uuid.uuid4()), 1
 
-    messages: list = body.get("messages") or []
+    messages: list = body.get("messages") or body.get("input") or []
     model: str = body.get("model", "")
 
     system_prompt = ""
@@ -41,7 +59,8 @@ def _extract_conversation_id(body: Optional[dict]) -> tuple[str, int]:
         content = msg.get("content") or ""
         if isinstance(content, list):
             content = " ".join(
-                p.get("text", "") for p in content if isinstance(p, dict)
+                str(p.get("text") or p.get("input_text") or "") 
+                for p in content if isinstance(p, dict)
             )
         if role == "system" and not system_prompt:
             system_prompt = content
@@ -53,30 +72,10 @@ def _extract_conversation_id(body: Optional[dict]) -> tuple[str, int]:
     if not first_user_msg:
         return str(uuid.uuid4()), 1
 
-    key = f"{system_prompt}|{first_user_msg}|{model}"
+    # Normalize to ensure stability across turns even if client adds whitespace/newlines
+    key = f"{system_prompt.strip()}|{first_user_msg.strip()}|{model}"
     conversation_id = hashlib.sha1(key.encode("utf-8", errors="replace")).hexdigest()
     return conversation_id, max(user_turn_count, 1)
-
-
-def _extract_token_counts(body: Optional[dict]) -> dict:
-    """
-    Extract token counts from the request body.
-    """
-    if not body:
-        return {}
-    result = {}
-    if "prompt_eval_count" in body:
-        result["prompt_tokens"] = body.get("prompt_eval_count")
-    if "eval_count" in body:
-        result["completion_tokens"] = body.get("eval_count")
-    usage = body.get("usage") or {}
-    if "prompt_tokens" in usage:
-        result["prompt_tokens"] = usage["prompt_tokens"]
-    if "completion_tokens" in usage:
-        result["completion_tokens"] = usage["completion_tokens"]
-    if "prompt_tokens" in result and "completion_tokens" in result:
-        result["total_tokens"] = result["prompt_tokens"] + result["completion_tokens"]
-    return result
 
 
 def build_doc(
@@ -98,6 +97,7 @@ def build_doc(
         "timestamp":       datetime.now(timezone.utc).isoformat(),
         "method":          method,
         "path":            path,
+        "user_input":      _extract_user_input(req_body),
         "model":           (req_body or {}).get("model"),
         "request_body":    req_body,
     }

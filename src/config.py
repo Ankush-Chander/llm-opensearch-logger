@@ -16,16 +16,36 @@ def _parse_mappings() -> list[dict]:
 
     mappings = []
     for item in PROXY_MAPPINGS.split(","):
-        parts = item.strip().strip("'\"").split(":")
-        if len(parts) == 2:
-            mappings.append({"port": int(parts[0]), "upstream": f"http://127.0.0.1:{parts[1]}", "name": "default"})
-        elif len(parts) == 3:
-            if parts[1].isdigit():
-                mappings.append({"port": int(parts[0]), "upstream": f"http://127.0.0.1:{parts[1]}", "name": parts[2]})
+        # Split into [listen_port, rest]
+        parts = item.strip().strip("'\"").split(":", 1)
+        if len(parts) != 2:
+            continue
+
+        listen_port = int(parts[0])
+        rest = parts[1]
+
+        # Check if the rest contains a name tag at the end (e.g. "https://api.openai.com:openai")
+        # We split from the right, but only if the last part isn't just a port number
+        sub_parts = rest.rsplit(":", 1)
+        if len(sub_parts) == 2 and not sub_parts[1].isdigit():
+            upstream = sub_parts[0]
+            name = sub_parts[1]
+        else:
+            upstream = rest
+            name = "default"
+
+        # Ensure upstream has a scheme
+        if not upstream.startswith(("http://", "https://")):
+            if ":" in upstream:
+                upstream = f"http://{upstream}"
             else:
-                mappings.append({"port": int(parts[0]), "upstream": f"http://{parts[1]}:{parts[2]}", "name": "default"})
-        elif len(parts) == 4:
-            mappings.append({"port": int(parts[0]), "upstream": f"http://{parts[1]}:{parts[2]}", "name": parts[3]})
+                upstream = f"http://127.0.0.1:{upstream}"
+
+        mappings.append({
+            "port": listen_port,
+            "upstream": upstream.rstrip("/"),
+            "name": name
+        })
     return mappings
 
 

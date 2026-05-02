@@ -8,7 +8,7 @@ from aiohttp import web
 
 from src.logging_pipeline.document import build_doc
 from src.logging_pipeline.queue import enqueue_log
-from src.proxy.response import stream_to_client, parse_response_content
+from src.proxy.response import stream_to_client
 
 log = logging.getLogger(__name__)
 
@@ -38,11 +38,16 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
         req_body=req_body,
     )
 
+    # ---- Initialize Parser ----
+    from src.proxy.parsers import get_parser
+    is_streaming = (req_body or {}).get("stream", False)
+    parser = get_parser(service_name, request.path, is_streaming)
     # ---- Build upstream URL ----
     target_url = f"{upstream_base}{request.path}"
     if request.query_string:
         target_url += f"?{request.query_string}"
 
+    print(f"target_url: {target_url}")
     headers = {
         k: v for k, v in request.headers.items()
         if k.lower() not in ("host", "content-length", "transfer-encoding")
@@ -73,14 +78,14 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             await web_resp.prepare(request)
 
             # ---- Stream to client, collect for logging ----
-            collected = await stream_to_client(upstream_resp, web_resp)
+            collected = await stream_to_client(upstream_resp, web_resp, parser=parser)
             await web_resp.write_eof()
 
             duration_ms = round((time.monotonic() - ts_start) * 1000, 2)
 
             # ---- Parse response for logging ----
-            response_content, token_info = parse_response_content(collected)
-
+            response_content, token_info = parser.finalize()
+            
             doc.update({
                 "response_status":  upstream_resp.status,
                 "response_content": response_content or None,
