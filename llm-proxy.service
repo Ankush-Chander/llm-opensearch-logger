@@ -1,8 +1,7 @@
 [Unit]
-Description=Ollama traffic logging reverse proxy
-After=network.target docker.service ollama.service
+Description=LLM traffic logging reverse proxy
+After=network.target docker.service 
 Wants=docker.service
-Requires=ollama.service
 
 [Service]
 Type=simple

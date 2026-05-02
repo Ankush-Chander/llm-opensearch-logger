@@ -92,13 +92,13 @@ python3 llm_proxy.py
 
 ```bash
 # Install as a user service (no sudo needed)
-cp ollama-proxy.service ~/.config/systemd/user/
+cp llm-proxy.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now ollama-proxy
+systemctl --user enable --now llm-proxy
 
 # Confirm it is running
-systemctl --user status ollama-proxy
-journalctl --user -u ollama-proxy -f
+systemctl --user status llm-proxy
+journalctl --user -u llm-proxy -f
 ```
 
 ---

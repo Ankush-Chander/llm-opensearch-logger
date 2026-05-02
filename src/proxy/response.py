@@ -29,7 +29,6 @@ async def stream_to_client(
     return bytes(collected)
 
 def parse_response_content(raw: bytes) -> tuple[str, dict]:
-    print(f" raw response: {raw}")
     content_parts = []
     token_info = {}
 
