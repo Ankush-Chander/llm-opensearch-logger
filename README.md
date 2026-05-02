@@ -46,30 +46,44 @@ curl http://0.0.0.0:11435/api/tags
 
 ---
 
-## 2. Start OpenSearch and Dashboards
+## 2. Start OpenSearch and Dashboards (Docker)
+
+If you have Docker installed, you can run everything (OpenSearch, Dashboards, and the Proxy) using the provided `docker-compose.yml`.
 
 ```bash
-# From the directory containing docker-compose.yml
-docker compose up -d
+# Build and start all services
+docker compose up -d --build
 
-# Wait for OpenSearch to become healthy (~30s)
-docker compose ps
-curl http://localhost:9200/_cluster/health?pretty
+# Verify the proxy is running
+docker compose logs -f proxy
 ```
+
+The proxy will be available at `http://localhost:11434`. By default, it expects Ollama to be running on the host at port `11435`.
 
 OpenSearch Dashboards → http://localhost:5601
 
 ---
 
-## 3. Install the proxy
+## 3. Install the proxy (Manual / Local Dev)
 
 ```bash
-mkdir -p ~/.local/ollama-proxy
-cp ollama_proxy.py requirements.txt ~/.local/ollama-proxy/
+# clone the repo
+git clone <repo_url>
+cd llm-opensearch-logger
+# create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Create a virtual environment
-python3 -m venv ~/.local/ollama-proxy/venv
-~/.local/ollama-proxy/venv/bin/pip install -r ~/.local/ollama-proxy/requirements.txt
+# install dependencies
+pip install -r requirements.txt
+```
+
+## 4. Run the proxy
+```bash
+# Run the proxy (simple test)
+python3 llm_proxy.py
+
+
 ```
 
 ---
@@ -78,13 +92,13 @@ python3 -m venv ~/.local/ollama-proxy/venv
 
 ```bash
 # Install as a user service (no sudo needed)
-cp ollama-proxy.service ~/.config/systemd/user/
+cp llm-proxy.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now ollama-proxy
+systemctl --user enable --now llm-proxy
 
 # Confirm it is running
-systemctl --user status ollama-proxy
-journalctl --user -u ollama-proxy -f
+systemctl --user status llm-proxy
+journalctl --user -u llm-proxy -f
 ```
 
 ---
@@ -148,6 +162,13 @@ Environment=PROXY_MAPPINGS=11434:11435:ollama,8002:8003:llama-server
 ```
 
 Each mapping follows the format `listen_port:upstream_port[:service_name]` or `listen_port:host:upstream_port[:service_name]`. The `service_name` will be stored in the `service` field in OpenSearch.
+
+**Note for Docker users:** Use `host.docker.internal` as the host to reach services running on your local machine:
+```yaml
+environment:
+  - PROXY_MAPPINGS=11434:host.docker.internal:11435:ollama,8002:host.docker.internal:8003:llama-server
+```
+Don't forget to also add these ports to the `ports:` section of your `docker-compose.yml`.
 
 ---
 
